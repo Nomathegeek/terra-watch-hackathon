@@ -1,9 +1,9 @@
 import streamlit as st
 import folium
-from streamlit_folium import folium_static  # CHANGÉ : folium_static au lieu de st_folium
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import date
+import tempfile
 
 # Configuration
 st.set_page_config(page_title="TerraWatch AI", layout="wide")
@@ -31,13 +31,19 @@ with st.sidebar:
 # Créer la carte Folium
 selected_zone = zones_data[zone]
 m = folium.Map(location=[selected_zone["lat"], selected_zone["lon"]], 
-               zoom_start=selected_zone["zoom"],
-               tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-               attr='Esri Satellite Imagery',
-               name='Satellite')
+               zoom_start=selected_zone["zoom"])
 
-# Ajouter une couche de carte alternative (optionnel)
-folium.TileLayer('OpenStreetMap').add_to(m)
+# Ajouter la couche satellite (ESRI)
+folium.TileLayer(
+    tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attr='Esri Satellite',
+    name='Vue satellite',
+    overlay=False,
+    control=True
+).add_to(m)
+
+# Ajouter OpenStreetMap comme option
+folium.TileLayer('OpenStreetMap', name='Carte standard').add_to(m)
 folium.LayerControl().add_to(m)
 
 # Si analyse déclenchée, ajouter une zone simulée
@@ -62,35 +68,62 @@ if analyser:
     
     st.success("✅ Analyse terminée ! Zone de changement détectée en rouge.")
 
+# Sauvegarder la carte en HTML temporaire
+if analyser:
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.html') as tmpfile:
+        m.save(tmpfile.name)
+        html_file = tmpfile.name
+    
+    # Lire le fichier HTML
+    with open(html_file, 'r', encoding='utf-8') as f:
+        html_content = f.read()
+
 # Affichage
 col1, col2 = st.columns([2, 1])
 
 with col1:
     st.subheader("📡 Carte satellite interactive")
-    st.write("*Zoom : molette | Déplacement : cliquer-glisser*")
+    st.write("*Utilisez la souris pour zoomer/déplacer*")
     
-    # Afficher la carte avec folium_static (GARANTI de fonctionner)
-    folium_static(m, width=700, height=500)
+    if analyser:
+        # Afficher la carte HTML
+        st.components.v1.html(html_content, width=700, height=500, scrolling=True)
+    else:
+        # Carte par défaut sans analyse
+        m_default = folium.Map(location=[selected_zone["lat"], selected_zone["lon"]], 
+                              zoom_start=selected_zone["zoom"])
+        folium.TileLayer(
+            tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            attr='Esri Satellite'
+        ).add_to(m_default)
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.html') as tmpfile:
+            m_default.save(tmpfile.name)
+            with open(tmpfile.name, 'r', encoding='utf-8') as f:
+                html_default = f.read()
+        
+        st.components.v1.html(html_default, width=700, height=500, scrolling=True)
     
     # Légende
     st.markdown("""
     **Légende :**
-    - 🟥 **Zone rouge** : Changements détectés (15.2 ha)
-    - 📍 **Marqueur** : Centre de la zone analysée
-    - 🌍 **Basculer la vue** : Icône en haut à droite
+    - 🟥 **Cercle rouge** : Changements détectés (15.2 ha)
+    - 📍 **Marqueur rouge** : Centre de la zone analysée
+    - 🌍 **Basculer la vue** : Icône en haut à droite (satellite/carte)
     """)
 
 with col2:
     st.subheader("📊 Résultats")
     
     if analyser:
-        # Métriques dans des cartes
-        st.metric(label="**Superficie affectée**", value="15.2 ha", delta="-2.4%")
-        st.metric(label="**Confiance IA**", value="92%", delta="+1.5%")
-        st.metric(label="**CO₂ émis estimé**", value="144 kt")
+        # Métriques
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.metric("Superficie", "15.2 ha", "-2.4%")
+        with col_b:
+            st.metric("Confiance IA", "92%", "+1.5%")
         
-        # Séparateur
-        st.divider()
+        st.metric("CO₂ émis", "144 kt")
         
         # Graphique
         st.subheader("📈 Évolution 2020-2024")
@@ -100,22 +133,17 @@ with col2:
         })
         fig, ax = plt.subplots(figsize=(6, 3))
         ax.plot(data['Année'], data['Couverture (%)'], 
-                marker='o', linewidth=2, color='#1E88E5', markersize=8)
+                marker='o', linewidth=2, color='green')
         ax.set_xlabel('Année')
-        ax.set_ylabel('Couverture (%)', fontweight='bold')
+        ax.set_ylabel('Couverture (%)')
         ax.grid(True, alpha=0.3)
-        ax.fill_between(data['Année'], data['Couverture (%)'], alpha=0.2, color='#1E88E5')
-        
-        # Ajouter les valeurs sur les points
-        for i, (année, valeur) in enumerate(zip(data['Année'], data['Couverture (%)'])):
-            ax.text(année, valeur+1, f'{valeur}%', ha='center', fontsize=9)
-        
+        ax.fill_between(data['Année'], data['Couverture (%)'], alpha=0.2, color='green')
         st.pyplot(fig)
         
         # Téléchargement
         st.download_button(
-            label="📥 Télécharger le rapport",
-            data=f"Rapport TerraWatch AI\nZone: {zone}\nSuperficie affectée: 15.2 ha\nConfiance: 92%\nPériode: {date_debut} à {date_fin}",
+            "📥 Télécharger rapport",
+            data=f"Rapport TerraWatch AI\nZone: {zone}\nSuperficie: 15.2 ha\nConfiance: 92%",
             file_name=f"terra_watch_{zone}.txt",
             mime="text/plain"
         )
@@ -123,15 +151,12 @@ with col2:
         st.info("""
         **Instructions :**
         1. Sélectionnez une zone
-        2. Ajustez les dates si besoin
-        3. Cliquez sur **🚀 Lancer la simulation**
+        2. Cliquez sur **🚀 Lancer la simulation**
+        3. Visualisez les résultats
         
-        *Les résultats apparaîtront ici.*
+        *La carte est interactive : zoom et déplacement possibles.*
         """)
 
 # Pied de page
 st.divider()
-cols = st.columns(3)
-with cols[1]:
-    st.caption("🚀 **TerraWatch AI** - Prototype Hackathon IA")
-    st.caption("Carte interactive avec Folium & Streamlit")
+st.caption("🚀 **TerraWatch AI** - Prototype Hackathon IA | Carte interactive Folium")
